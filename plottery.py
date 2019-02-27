@@ -278,7 +278,7 @@ def graphplot(data, node_colorscale='Rainbow', layout='spring', direction='out')
             et = str(u) + " , " + str(v) + " : " + str(w)
         else:
             et = str(u) + " -> " + str(v) + " : " + str(w)
-        text_e.extend([et, et, None])
+#        text_e.extend([et, et, None])
 
     #color = [degrees[k] for k in nodes]
     #opacity = [degrees[k]/float(max(color)) for k in nodes]
