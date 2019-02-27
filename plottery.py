@@ -29,7 +29,7 @@ def barplot(data,
         if x_map is not None:
             if isinstance(x_map, dict):
                 xs = [x_map[x] for x in xs]
-            elif isinstance(x_map, callable):
+            elif callable(x_map):
                 xs = [x_map(x) for x in xs]
             else:
                 raise ValueError('x_map should be dict or callable')
@@ -90,7 +90,7 @@ def scatterplot_line(
     if x_map is not None:
         if isinstance(x_map, dict):
             kargs['text'] = [x_map[x] for x in xs]
-        elif isinstance(x_map, callable):
+        elif callable(x_map):
             kargs['text'] = [x_map(x) for x in xs]
         else:
             raise ValueError('x_map should be dict or callable')
@@ -174,7 +174,7 @@ def heatmap(
     if x_map is not None:
         if isinstance(x_map, dict):
             kargs['text'] = [[str((x_map[x], y)) for x in xs] for y in ys]
-        elif isinstance(x_map, callable):
+        elif callable(x_map):
             kargs['text'] = [[str((x_map(x), y)) for x in xs] for y in ys]
         else:
             raise ValueError('x_map should be dict or callable')
@@ -206,7 +206,7 @@ def multi_scatterplot(
     if x_map is not None:
         if isinstance(x_map, dict):
             kargs['text'] = [x_map[t] for t in ts]
-        elif isinstance(x_map, callable):
+        elif callable(x_map):
             kargs['text'] = [x_map(t) for t in ts]
         else:
             raise ValueError('x_map should be dict or callable')
@@ -267,18 +267,18 @@ def graphplot(data, node_colorscale='Rainbow', layout='spring', direction='out')
     Xe, Ye, text_e = [], [], []
     max_d, degrees, wdegrees, weights = 0, Counter(), Counter(), []
     for u, v, w in graph.edges(data='weight'):
-        Xe.append([pos[u][0], pos[v][0]])
-        Ye.append([pos[u][1], pos[v][1]])
+        Xe.extend([pos[u][0], pos[v][0], None])
+        Ye.extend([pos[u][1], pos[v][1], None])
         weights.append(w)
         #degrees[u] += 1
         #wdegrees[u] += w
         if direction == 'both':
             #degrees[v] += 1
             #wdegrees[v] += w
-            et = str(u) + "," + str(v) + ":" + str(w)
+            et = str(u) + " , " + str(v) + " : " + str(w)
         else:
-            et = str(u) + "->" + str(v) + ":" + str(w)
-        text_e.append(et)
+            et = str(u) + " -> " + str(v) + " : " + str(w)
+        text_e.extend([et, et, None])
 
     #color = [degrees[k] for k in nodes]
     #opacity = [degrees[k]/float(max(color)) for k in nodes]
@@ -309,13 +309,14 @@ def graphplot(data, node_colorscale='Rainbow', layout='spring', direction='out')
 
     #widths = [1.5*(w-min(weights))/float(max(max(weights) - min(weights), 1)) + 0.5 for w in weights]
     #opacities = [w/float(max(weights)) for w in weights]
-    trace_edges= [dict(type='scatter', mode='lines',
-                       x=x, y=y, name=te,
-                       line=dict(width=1, opacity=1, color='#888'),
-                       hoverinfo='name',
-                       textposition='outside',
-                       hoverlabel = dict(namelength = -1),
-                       hoveron='fills',
-                       showlegend=False) for x, y, te in zip(Xe, Ye, text_e)] 
+    trace_edges= dict(type='scatter', mode='lines',
+                      x=Xe, y=Ye,
+#                      text=text_e,
+                      line=dict(width=1, opacity=1, color='#888'),
+#                      hoverinfo='text',
+#                      textposition='outside',
+#                      hoverlabel = dict(namelength = -1),
+#                      hoveron='fills',
+                      showlegend=False)
 
-    return trace_edges + [trace_nodes]
+    return [trace_edges, trace_nodes]

@@ -114,12 +114,13 @@ def neighbor_number_of(streamgraph, direction='out'):
 def neighor_coverage_of(streamgraph, direction='out'):
     # Robin
     # |E(v, ., .)|/|E'(v, ., .)| neighbour coverage of node v ∈ V (in %)
-    data = link_size_per_node(streamgraph, direction, False)
+    data = neighbor_number_of(streamgraph, direction)
     data_ep = Counter()
     for ts, nodes in iteritems(Eprime(streamgraph)):
         for n in nodes:
             data_ep[n] += len(nodes) - 1
-    return Counter(data[k]/float(data_ep[k]) for k in data_ep.keys())
+
+    return {k: data[k]/float(data_ep[k]) if .0 not in [data[k], float(data_ep[k])] else .0 for k in data_ep.keys()}
 
 @categorical
 def link_number_at(streamgraph):

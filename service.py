@@ -7,7 +7,9 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import mplcursors
+from six import iteritems
 from collections import defaultdict, Counter
+from dash.dependencies import Input, Output, State
 from datetime import datetime, timedelta
 
 import dash
@@ -16,8 +18,11 @@ import dash_core_components as dcc
 import plotly.graph_objs as go
 import dash_html_components as html
 import math
-from dash.dependencies import Input, Output, State
-from six import iteritems
+import os
+import os.path
+import flask
+import shutil
+from tempfile import mkstemp
 
 import utils, metrics, plottery
 debug=False
@@ -40,6 +45,8 @@ step = int((min_time_dt + timedelta(days=1)).timestamp() - min_time)
 marks = {i: datetime.fromtimestamp(i).strftime("%d %b") for i in range(min_time, max_time, step)}
 marks[min_time] = min_time_dt.strftime("%d%b %Y %H:%M")
 marks[max_time] = max_time_dt.strftime("%d%b %Y %H:%M")
+
+tmp_dir = 'tmp'
 
 percentage_data = html.Div(id='dp', children=[
         html.Div(id='dp-tag', children=['Select Data From Time Range']),
@@ -100,7 +107,7 @@ discrete_time = html.Div(id='dt', children=[
         style = dict(
             width='60%',
             marginTop='3.0%',
-            marginLeft='18.3%',
+            marginLeft='19.4%',
             display='table',
         ))
 
@@ -164,13 +171,17 @@ app.layout = html.Div(id='base-html', children=[
     percentage_data,
     html.Div(id='blank', style=dict(height="10%")),
     discrete_time,
-    html.Button(id='stats-button', n_clicks=0, children='Print Stats', style={'marginLeft':'45%', 'marginTop':'1%'}),
+    html.Button(id='stats-button', n_clicks=0, children='Print Stats', style={'marginLeft':'46%', 'marginTop':'1%'}),
     html.Div(id='stats', children=[], style={'marginTop':'1%', 'width': '100%'}),
     plot_type,
     measures,
     plot_options,
-    html.Button(id='figure-button', n_clicks=0, children='Plot Figure', style={'marginLeft':'45%', 'marginTop':'1.3%'}),
-    html.Div(id='figure-plot', children=[], style={'marginTop':'1.5%'})])
+    html.Button(id='figure-button', n_clicks=0, children='Plot Figure', style={'marginLeft':'46%', 'marginTop':'1.3%'}),
+    html.Div(id='figure-plot', children=[], style={'marginTop':'1.5%'}),
+    html.Div(id='download-div', children=[
+        html.A(id='download-button', n_clicks=0, children='Download .csv', style={'marginLeft':'47%', 'marginTop':'1.3%'})
+        ], style={'display': 'none'})          
+        ])
 
 @app.callback(
     dash.dependencies.Output('dp-tag', 'children'),
@@ -246,7 +257,7 @@ def print_stats(n_clicks, data_percentage, s, m, h, d):
 def add_measures(value, selections):
     if value:
         if selections is not None:
-            if value == '2M':
+            if value == '2M' and isinstance(selections, list):
                 if len(selections) == 1:
                     if selections[0] in time_plots:
                         # time plots
@@ -257,6 +268,7 @@ def add_measures(value, selections):
                 elif len(selections) >= 2:
                     return [elem for elem in plots[value] if elem['value'] in selections]
         return plots[value]
+    return []
 
 @app.callback(
     dash.dependencies.Output('measures-dropdown', 'multi'),
@@ -274,8 +286,8 @@ def add_measures(value, selections, po_selections):
         po_selections = {}
     else:
         po_selections = set(po_selections)
-    if not selections:
-        return
+    if not selections or not value:
+        return []
 
     def filter_options(opt, group):
         return [opt for opt in options if opt['value'] not in group]
@@ -390,10 +402,14 @@ def display_graph(n_clicks,
         else:
            return "Please set a descretization step."
 
+
 def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
     xaxis, yaxis, layout, plot_extra_args = dict(), dict(), dict(), dict()
     plot_options = (set() if plot_options is None else set(plot_options))
     xtitle, ytitle, ignore_cl = None, None, False
+    
+    csv_comment = "# 1 = retweet; 2 = citation; 3 réponse"
+    csv_header = ["Category"]
 
     def measure_1D(measures, direction='both'):
         if measures == 'time_number_of':
@@ -419,7 +435,7 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
         elif measures == 'neighor_coverage_of':
             data = metrics.neighor_coverage_of(stream_graphs, direction)
             xtitle = 'Time'
-            ytitle = 'Node Coverage'
+            ytitle = 'Neighor Coverage'
         elif measures == 'link_number_at':
             data = metrics.link_number_at(stream_graphs)
             xtitle = 'Time'
@@ -457,9 +473,8 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
                 plot_extra_args['sort_by_x'] = True
                 plot_extra_args['map_x_before_sorting'] = False
 
-        if measures in coverage_measures:
-            #yaxis['tickformat'] = '.4f%'
-            yaxis['range'] = [0,1]
+        data_csv = [(c, u, v) for c, d in iteritems(data) for u, v in iteritems(d)]
+        csv_header += [xtitle, ytitle]
 
     elif plot_type == '2D':
         if 'in' in plot_options:
@@ -475,26 +490,34 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
             ytitle = 'Node'
             ztitle = 'Link Number'
             xytitle = 'Node Couple'
+            data_csv = [(c, x, y, z) for c, d_c in iteritems(data) for (x, y), z in iteritems(d_c)]
         elif measures == 'link_coverage_of_node_couple':
             data = metrics.link_coverage_of_node_couple(stream_graphs, direction)
             xtitle = 'Node'
             ytitle = 'Node'
             ztitle = 'Link Coverage'
             xytitle = 'Node Couple'            
+            csv_header += [xtitle, ytitle, ztitle]
+            data_csv = [(c, x, y, z) for c, d_c in iteritems(data) for (x, y), z in iteritems(d_c)]
         elif measures == 'neighbor_number_of_at':
             data = metrics.neighbor_number_of_at(stream_graphs, direction)
             xtitle = 'Time'
             ytitle = 'Node'
             ztitle = 'Neighbor Number'
             xytitle = 'Node x Time'
+            csv_header += [xtitle, ytitle, ztitle]
+            data_csv = [(c, x, y, z) for c, d_c in iteritems(data) for x, d in iteritems(d_c) for y, z in iteritems(d)]
         elif measures == 'neighbor_density_of_at':        
             data = metrics.neighbor_density_of_at(stream_graphs, direction)
             xtitle = 'Time'
             ytitle = 'Node'
             ztitle = 'Neighbor Density'
             xytitle = 'Node x Time'
+            data_csv = [(c, x, y, z) for c, d_c in iteritems(data) for x, d in iteritems(d_c) for y, z in iteritems(d)]
         if measures in directional:
             ztitle += ("" if direction == 'both' else " (" + direction + ")")
+
+
 
         # Set plottery options
         has_plot_type_flag = len(plot_options & {'barplot', 'heatmap', 'weighted_graph', 'multiple_curves'})
@@ -516,7 +539,6 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
         elif 'multiple_curves' in plot_options or (not has_plot_type_flag and measures in v_times_t_plots):
             plot_fun = plottery.multi_scatterplot
             plot_extra_args['x_map'] = date_bins
-            xtitle = xtitle
             ytitle = ztitle
 
         if measures in v_times_t_plots:
@@ -524,15 +546,12 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
                 # Unravel
                 data = utils.unravel_time(data, True)
                 def date_map(tup):
-                    return ":".join([tup[0], date_bins[tup[1]]])
+                    return ":".join([tup[0], str(date_bins[tup[1]])])
                 plot_extra_args['x_map'] = date_map
             elif plot_fun is plottery.heatmap:
                 data = utils.unravel_time(data)
                 plot_extra_args['x_map'] = date_bins
 
-        if measures in coverage_measures and (plot_fun in [plottery.barplot, plottery.multi_scatterplot]):
-            #yaxis['tickformat'] = ',.4f%'
-            yaxis['range'] = [0,1]
     elif plot_type == '2M':
         if 'in_x' in plot_options:
             direction_x = 'in'
@@ -576,20 +595,22 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
             elif direction_y is None:
                 direction_x = direction_y
 
-        data_x, _, xtitle = measure_1D(measures[0], direction_x)
+        data_x, base_title, xtitle = measure_1D(measures[0], direction_x)
         if measures[0] in directional:
             xtitle += ("" if direction_x == 'both' else " (" + direction_x + ")")
         data_y, _, ytitle = measure_1D(measures[1], direction_y)
         if measures[1] in directional:
             ytitle += ("" if direction_y == 'both' else " (" + direction_y + ")")
 
-        data = {c: (data_x[c], data_y[c]) for c in range(1, len(clabels) + 1)}
+        data = {c: ([data_x[c], data_y[c]]) for c in range(1, len(clabels) + 1)}
         plot_fun = plottery.scatterplot_points
         if measures[0] in time_plots:
             plot_extra_args['text_map'] = date_bins
 
+        data_csv = [(c, k, x[k], y[k]) for c, (x, y) in iteritems(data) for k in set(x.keys()) & set(y.keys())]
+        csv_header += [base_title, xtitle, ytitle]
+
     if plot_fun is plottery.graphplot:
-        print("hey")
         axis = dict(
             showline=False, # hide axis line, grid, ticklabels and  title
             zeroline=False,
@@ -619,8 +640,17 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
         plot_extra_args['sort_by_x'] = True
 #    if ensemble and plot_fun is plottery.barplot:
 #        layout['barmode'] = 'group'
-    return plot_figure(data, (plot_fun, plot_extra_args), layout)
+    fig = plot_figure(data, (plot_fun, plot_extra_args), layout)
 
+    if isinstance(fig, str):
+        return fig
+    else:
+        prefix = "__".join(["_".join([l.lower() for l in h.split(" ")]) for h in csv_header[1:]])+"__"
+        fd, address = mkstemp(suffix=".csv", prefix=prefix, dir=tmp_dir)
+        f = open(fd, 'w+')
+        f.write(csv_comment + "\n")
+        pd.DataFrame(data_csv, columns=csv_header).to_csv(f, header=True, index=False)
+        return [fig, html.Div(id='json-data', children=address, style={'display': 'none'})]
 
 def plot_figure(data, plot_fun, layout_args):
     figures = dict()
@@ -653,6 +683,31 @@ def plot_figure(data, plot_fun, layout_args):
     elif len(figures):
         return figures.values()[0]
 
+
+@app.callback(
+    dash.dependencies.Output('download-div', 'style'),
+    [dash.dependencies.Input('figure-plot', 'children')])
+def display_download(children):
+    return ({'display': 'block'} if bool(children) and not isinstance(children, str) else {'display': 'none'})
+
+
+@app.callback(
+    Output('download-button', 'href'),
+   [dash.dependencies.Input('figure-plot', 'children')])
+def update_href(children):
+    if bool(children) and not isinstance(children, str):
+        if len(children) > 1:
+            address = children[1]['props']['children']
+            path = os.path.normpath(address)
+            ra = path.split(os.sep)[-2:]
+            return '/{}'.format(os.path.join(ra[0], ra[1]))
+
+
+@app.server.route('/tmp/<path:path>')
+def serve_static(path):
+    root_dir = os.getcwd()
+    return flask.send_from_directory(os.path.join(root_dir, 'tmp'), path)
+
 def get_sg(data_percentage, step):
     df = df_base[(df_base.ts <= data_percentage[1]) & (df_base.ts >= data_percentage[0])]
     df, bins = utils.time_discretizer(df, step)
@@ -662,4 +717,11 @@ def get_sg(data_percentage, step):
 
 
 if __name__ == '__main__':
+    try:
+        os.mkdir(tmp_dir)
+    except Exception:
+        shutil.rmtree(tmp_dir)
+        os.mkdir(tmp_dir)
     app.run_server(port=4050, debug=debug)
+    # Remove temporary files
+    shutil.rmtree(tmp_dir)
