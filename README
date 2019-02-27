@@ -1,0 +1,8 @@
+1. Add the 'user_user_time' file.
+2. Install dependencies
+    pip install dash==0.35.1  # The core dash backend
+    pip install dash-html-components==0.13.4  # HTML components
+    pip install dash-core-components==0.42.1  # Supercharged components
+    pip install dash-table==3.1.11  # Interactive DataTable component (new!)
+3. Run python service.py
+
