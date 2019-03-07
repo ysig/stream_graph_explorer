@@ -497,7 +497,6 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
             ytitle = 'Node'
             ztitle = 'Link Coverage'
             xytitle = 'Node Couple'            
-            csv_header += [xtitle, ytitle, ztitle]
             data_csv = [(c, x, y, z) for c, d_c in iteritems(data) for (x, y), z in iteritems(d_c)]
         elif measures == 'neighbor_number_of_at':
             data = metrics.neighbor_number_of_at(stream_graphs, direction)
@@ -505,7 +504,6 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
             ytitle = 'Node'
             ztitle = 'Neighbor Number'
             xytitle = 'Node x Time'
-            csv_header += [xtitle, ytitle, ztitle]
             data_csv = [(c, x, y, z) for c, d_c in iteritems(data) for x, d in iteritems(d_c) for y, z in iteritems(d)]
         elif measures == 'neighbor_density_of_at':        
             data = metrics.neighbor_density_of_at(stream_graphs, direction)
@@ -516,7 +514,7 @@ def plot_router(plot_type, measures, plot_options, stream_graphs, date_bins):
             data_csv = [(c, x, y, z) for c, d_c in iteritems(data) for x, d in iteritems(d_c) for y, z in iteritems(d)]
         if measures in directional:
             ztitle += ("" if direction == 'both' else " (" + direction + ")")
-
+        csv_header += [xtitle, ytitle, ztitle]
 
 
         # Set plottery options
